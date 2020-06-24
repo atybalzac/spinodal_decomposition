@@ -56,7 +56,7 @@ int main(int argc, char **argv){
        
         //write image to file iterating name based on timestep. Numbers are padded with leading zeroes so they sort correctly
         if (argc > 1){ 
-            snprintf(imgpath, sizeof(imgpath), "%s_t=%03f.bmp", argv[1], time);
+            snprintf(imgpath, sizeof(imgpath), "%s_t=%06.2f.bmp", argv[1], time);
              img -> WriteToFile(imgpath);
            
         }
