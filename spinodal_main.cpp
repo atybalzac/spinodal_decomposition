@@ -4,13 +4,16 @@
 #include "spinodal.hpp"
 #include <stdio.h>
 #include "EasyBMP.h"
-#include <linux/limits.h>
+#include <limits.h>
 
 int main(int argc, char **argv){
+    
     register int i, j;
-
-    double endtime = 100;
-    double time;
+    double endtime = 1000.0;
+    double dcdt,conc,time,prefactor,bulkderiv;
+    double temp[XSIZE][YSIZE],chempot[XSIZE][YSIZE];
+    char oldtime[128],newtime[128];
+    struct Vec term[XSIZE][YSIZE];
 
     //seed random number generator
     FILE *seed = fopen("/dev/urandom", "r");
@@ -21,13 +24,16 @@ int main(int argc, char **argv){
     srand(random_data);
 
     //initialize Gc
+    double new_min = -GFluct;
+    double new_max = GFluct;
+    double new_range = new_max - new_min;
+    double num = 0.0;
+
     for(i = 0; i < XSIZE; i++){
         for (j = 0; j < YSIZE; j++){
-            double new_min = 0.48;
-            double new_max = 0.52;
-            double new_range = new_max - new_min;
-            double num = ((rand()*(new_range))/RAND_MAX)+new_min;
-            Gc[i][j]=num;
+            Gc[i][j] = ((rand()*(new_range))/RAND_MAX)+new_min;
+            Gfield[i][j].x = 0.0;
+            Gfield[i][j].y = 0.0;
         }
 
     }
@@ -39,28 +45,64 @@ int main(int argc, char **argv){
     char imgpath[PATH_MAX];
 
     //Advance through time
+    sprintf(oldtime,"0");
     for (time = 0; time <= endtime; time += Gdt){
         for (i = 0; i < XSIZE; i++){
-            for(j = 0; j < YSIZE; j++){
-                double newc = Gc[i][j] + GM * (firstderiv(i,j) -2 * Gc[i][j] * firstderiv(i,j)) * (firstderiv(i,j) * (2*Gc[i][j] * firstderiv(i,j)) - Geps2 * thirderiv(i,j));
+            for (j = 0; j < YSIZE; j++){
+                conc = Gc[i][j];
+                bulkderiv  = conc * ((conc*conc) - 1.0);
+                chempot[i][j] = bulkderiv - (Geps2 * laplac(Gc,i,j));
+            }
+        }
+
+        // Now the inner scalar term is calculated everywhere, we next need
+        // to create the inner vector field
+
+        for (i = 0; i < XSIZE; i++){
+            for (j = 0; j < YSIZE; j++){
+                Gfield[i][j] = grad(chempot,i,j);
+                Gfield[i][j].x = Gfield[i][j].x;
+                Gfield[i][j].y = Gfield[i][j].y;
+            }
+        }
+
+        // Now all we need to do is take the divergence of the vector field Gfield,
+        // already calculated at each point above, and then multiply by the mobility
+       
+        for (i = 0; i < XSIZE; i++){
+            for (j = 0; j < YSIZE; j++){
+                dcdt = GM * div(Gfield,i,j);
+                temp[i][j] = Gc[i][j] + (dcdt * Gdt);
+            }
+        }
+
+        // The new concentrations are stored in the temp array. Transfer them to the
+        // concentration array.
+
+        for (i = 0; i < XSIZE; i++){
+            for (j = 0; j < YSIZE; j++){
+
                 //set pixel colors, can replace with commented lines for grayscale instead of blue/pink
                 img -> SetPixel(i, j, (RGBApixel){
                     .Blue = 27, //(ebmpBYTE)(255*Gphi[i][j]),
                     .Green = 163, //(ebmpBYTE)(255*Gphi[i][j]),
-                    .Red = (ebmpBYTE)(((Gc[i][j]-0.48)*255.0)/(0.52-0.48)),
+                    .Red = (ebmpBYTE)(((Gc[i][j]+2.0)*255.0)/(4.0)),
                     .Alpha = 0,
                 });
-                Gc[i][j] = newc;
+
+                Gc[i][j] = temp[i][j];
             }
         }
        
         //write image to file iterating name based on timestep. Numbers are padded with leading zeroes so they sort correctly
-        if (argc > 1){ 
-            snprintf(imgpath, sizeof(imgpath), "%s_t=%06.2f.bmp", argv[1], time);
+        sprintf(newtime,"%d",(int)(time));
+        if (argc > 1 && (strcmp(oldtime,newtime) || time < Gdt)) { 
+            snprintf(imgpath, sizeof(imgpath), "%s_t=%04d.bmp", argv[1], atoi(newtime));
              img -> WriteToFile(imgpath);
-           
+            strcpy(oldtime,newtime);
         }
     }
 
+    exit(0);
 
 }
